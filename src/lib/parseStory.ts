@@ -2,11 +2,12 @@
 import { Scene, Story, StoryFormData } from "./types";
 
 export function parseStory(texte: string, meta: StoryFormData): Story {
-  const lignes   = texte.split("\n");
-  const scenes:  Scene[] = [];
-  let morale     = "";
+  const lignes  = texte.split("\n");
+  const scenes: Scene[] = [];
+  let morale            = "";
   let sceneActuelle: { num: string; titre: string } | null = null;
   let contenuScene: string[] = [];
+  let imagePrompt       = "";
 
   for (const ligne of lignes) {
     const t = ligne.trim();
@@ -15,18 +16,27 @@ export function parseStory(texte: string, meta: StoryFormData): Story {
       continue;
     }
 
-    // Détecte SCÈNE / SCENE / SCÈNE N : titre
+    // Détecte SCÈNE N : titre
     const matchScene = t.match(/^SC[EÈ]NE\s*(\d+)\s*[:–\-]\s*(.+)/i);
     if (matchScene) {
       if (sceneActuelle) {
         scenes.push({
-          num:     sceneActuelle.num,
-          titre:   sceneActuelle.titre,
-          contenu: contenuScene.join("\n").trim(),
+          num:         sceneActuelle.num,
+          titre:       sceneActuelle.titre,
+          contenu:     contenuScene.join("\n").trim(),
+          imagePrompt: imagePrompt || undefined,
         });
         contenuScene = [];
+        imagePrompt  = "";
       }
       sceneActuelle = { num: matchScene[1], titre: matchScene[2].trim() };
+      continue;
+    }
+
+    // Détecte IMAGE: description
+    const matchImage = t.match(/^IMAGE\s*:\s*(.+)/i);
+    if (matchImage) {
+      imagePrompt = matchImage[1].trim();
       continue;
     }
 
@@ -35,12 +45,14 @@ export function parseStory(texte: string, meta: StoryFormData): Story {
     if (matchMorale) {
       if (sceneActuelle) {
         scenes.push({
-          num:     sceneActuelle.num,
-          titre:   sceneActuelle.titre,
-          contenu: contenuScene.join("\n").trim(),
+          num:         sceneActuelle.num,
+          titre:       sceneActuelle.titre,
+          contenu:     contenuScene.join("\n").trim(),
+          imagePrompt: imagePrompt || undefined,
         });
         sceneActuelle = null;
         contenuScene  = [];
+        imagePrompt   = "";
       }
       morale = matchMorale[1].trim();
       continue;
@@ -51,21 +63,16 @@ export function parseStory(texte: string, meta: StoryFormData): Story {
 
   if (sceneActuelle && contenuScene.length) {
     scenes.push({
-      num:     sceneActuelle.num,
-      titre:   sceneActuelle.titre,
-      contenu: contenuScene.join("\n").trim(),
+      num:         sceneActuelle.num,
+      titre:       sceneActuelle.titre,
+      contenu:     contenuScene.join("\n").trim(),
+      imagePrompt: imagePrompt || undefined,
     });
   }
 
-  // Fallback si l'IA n'a pas suivi le format
   if (scenes.length === 0) {
     scenes.push({ num: "1", titre: "Le conte", contenu: texte.trim() });
   }
 
-  return {
-    titre:  `L'histoire de ${meta.prenom}`,
-    scenes,
-    morale,
-    meta,
-  };
+  return { titre: `L'histoire de ${meta.prenom}`, scenes, morale, meta };
 }
