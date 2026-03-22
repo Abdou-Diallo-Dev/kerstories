@@ -37,11 +37,29 @@ export default function AdminPage() {
   useEffect(() => { if (user) checkAdminAndLoad(); }, [user]);
 
   async function checkAdminAndLoad() {
-    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user!.id).single();
-    if (profile?.role !== "admin") { setIsAdmin(false); setLoading(false); return; }
-    setIsAdmin(true);
-    await Promise.all([loadStats(), loadUsers(), loadLogs()]);
-    setLoading(false);
+    try {
+      const { data: profile, error } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user!.id)
+        .single();
+
+      console.log("Profile check:", profile, error);
+
+      if (error || !profile || profile.role !== "admin") {
+        setIsAdmin(false);
+        setLoading(false);
+        return;
+      }
+
+      setIsAdmin(true);
+      await Promise.all([loadStats(), loadUsers(), loadLogs()]);
+    } catch (e) {
+      console.error("Admin check error:", e);
+      setIsAdmin(false);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function loadStats() {
