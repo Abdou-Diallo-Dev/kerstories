@@ -189,7 +189,7 @@ export default function AdminPage() {
         {/* ── Stats ── */}
         {tab === "stats" && (
           <div>
-            <div className="grid grid-cols-3 gap-4 mb-6">
+            <div className="admin-stats-grid grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
               {statCards.map((s) => (
                 <div key={s.label} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "14px", padding: "28px 24px" }}>
                   <p style={{ ...numStyle, color: s.color }}>{s.val}</p>

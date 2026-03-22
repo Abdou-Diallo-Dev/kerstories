@@ -81,7 +81,7 @@ export default function ProfilePage() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-4 mb-8">
+        <div className="profile-stats-grid grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           {[
             { label: "Histoires créées", val: profile?.total_stories ?? 0 },
             { label: "Aujourd'hui",      val: profile?.stories_today ?? 0 },

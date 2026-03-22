@@ -147,7 +147,7 @@ export default function StoryDisplay({ story, onNew }: StoryDisplayProps) {
     <div className="animate-fade-in flex flex-col h-full overflow-hidden">
 
       {/* ── Barre de progression ── */}
-      <div className="flex items-center gap-2 px-8 pt-5 pb-3 flex-shrink-0 no-print">
+      <div className="story-progress-bar flex items-center gap-2 px-4 md:px-8 pt-4 pb-3 flex-shrink-0 no-print">
         {scenes.map((_, i) => (
           <div key={i} className="flex items-center gap-2">
             <button onClick={() => { stopReading(); setCurrentScene(i); }}
@@ -182,7 +182,7 @@ export default function StoryDisplay({ story, onNew }: StoryDisplayProps) {
       </div>
 
       {/* ── Contenu scrollable ── */}
-      <div className="flex-1 overflow-y-auto px-8 pb-6">
+      <div className="flex-1 overflow-y-auto px-4 md:px-8 pb-6">
 
         {/* ── Vue Scène ── */}
         {!showMorale && scene && (
@@ -295,7 +295,7 @@ export default function StoryDisplay({ story, onNew }: StoryDisplayProps) {
 
       {/* ── Navigation ── */}
       {!showMorale && (
-        <div className="flex items-center justify-between px-8 py-4 flex-shrink-0 no-print"
+        <div className="story-nav-bar flex items-center justify-between px-4 md:px-8 py-4 flex-shrink-0 no-print"
           style={{ borderTop: "1px solid rgba(139,69,19,0.1)", background: "white" }}>
           <button
             onClick={() => { stopReading(); setCurrentScene((p) => Math.max(0, p - 1)); }}

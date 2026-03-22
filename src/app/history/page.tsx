@@ -89,7 +89,7 @@ export default function HistoryPage() {
             </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-6">
+          <div className="history-grid grid grid-cols-1 md:grid-cols-2 gap-6">
             {stories.map((s) => {
               const story = s.content;
               const meta  = story?.meta;
