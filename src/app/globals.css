@@ -1,0 +1,82 @@
+/* src/app/globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --sand:       #E8C98A;
+  --terracotta: #C4622D;
+  --earth:      #8B4513;
+  --savanna:    #2D5016;
+  --cream:      #FAF3E7;
+  --deep:       #1A0A00;
+  --gold:       #D4900A;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  font-family: var(--font-dm), sans-serif;
+  background-color: var(--cream);
+  color: var(--deep);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar fine */
+::-webkit-scrollbar          { width: 4px; }
+::-webkit-scrollbar-track    { background: transparent; }
+::-webkit-scrollbar-thumb    { background: rgba(139, 69, 19, 0.25); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(139, 69, 19, 0.45); }
+
+/* Motif kente en bande */
+.kente-bar {
+  height: 5px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--terracotta) 0px,
+    var(--terracotta) 20px,
+    var(--gold)       20px,
+    var(--gold)       40px,
+    var(--savanna)    40px,
+    var(--savanna)    60px,
+    var(--deep)       60px,
+    var(--deep)       80px
+  );
+}
+
+/* Animation fadeIn */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: fadeIn 0.5s ease forwards; }
+
+/* Dot bounce pour loading */
+@keyframes dotBounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40%           { transform: scale(1);   opacity: 1;   }
+}
+
+/* Drop cap première scène */
+.first-scene::first-letter {
+  font-family:   var(--font-playfair), serif;
+  font-size:     64px;
+  font-weight:   900;
+  float:         left;
+  line-height:   0.82;
+  margin-right:  10px;
+  margin-top:    6px;
+  color:         var(--terracotta);
+}
+
+/* Print styles */
+@media print {
+  .no-print   { display: none !important; }
+  .story-card { box-shadow: none; border: 1px solid #ccc; }
+}
