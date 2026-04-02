@@ -13,6 +13,7 @@ import Link from "next/link";
 export default function DashboardPage() {
   const { user, loading: authLoading, signOut } = useAuth();
   const [story,        setStory]        = useState<Story | null>(null);
+  const [storyId,      setStoryId]      = useState<string | null>(null);
   const [generating,   setGenerating]   = useState(false);
   const [error,        setError]        = useState("");
   const [profiles,     setProfiles]     = useState<ChildProfile[]>([]);
@@ -50,14 +51,22 @@ export default function DashboardPage() {
   }
 
   async function handleGenerate(data: StoryFormData) {
-    setGenerating(true); setError(""); setStory(null);
+    setGenerating(true); setError(""); setStory(null); setStoryId(null);
     try {
       const res  = await fetch("/api/generate-story", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
       const json: GenerateResponse = await res.json();
       if (!json.success || !json.story) throw new Error(json.error ?? "Erreur inconnue");
       setStory(json.story);
-      if (user) {
-        await supabase.from("saved_stories").insert({ user_id: user.id, title: json.story.titre, content: json.story });
+      if (json.savedStoryId) {
+        setStoryId(json.savedStoryId);
+        fetchStoryCount();
+      } else if (user) {
+        const { data: savedStory } = await supabase
+          .from("saved_stories")
+          .insert({ user_id: user.id, title: json.story.titre, content: json.story })
+          .select("id")
+          .single();
+        setStoryId(savedStory?.id ?? null);
         fetchStoryCount();
       }
     } catch (err: unknown) {
@@ -154,7 +163,7 @@ export default function DashboardPage() {
       {/* Layout principal */}
       <div className="dashboard-layout">
         <StoryForm onGenerate={handleGenerate} loading={generating} />
-        <StoryPanel story={story} loading={generating} onNew={() => { setStory(null); setError(""); }} />
+        <StoryPanel story={story} storyId={storyId} loading={generating} onNew={() => { setStory(null); setStoryId(null); setError(""); }} />
       </div>
     </div>
   );

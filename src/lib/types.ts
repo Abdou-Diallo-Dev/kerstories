@@ -27,9 +27,10 @@ export interface Story {
 }
 
 export interface GenerateResponse {
-  success: boolean;
-  story?:  Story;
-  error?:  string;
+  success:      boolean;
+  story?:       Story;
+  error?:       string;
+  savedStoryId?: string | null;
 }
 
 export interface ChildProfile {

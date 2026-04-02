@@ -1,6 +1,7 @@
 // src/app/share/[token]/page.tsx
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
+import { toResponsiveSvg } from "@/lib/sanitizeSvg";
 
 export default async function SharePage({ params }: { params: { token: string } }) {
   const supabase = createClient();
@@ -59,7 +60,7 @@ export default async function SharePage({ params }: { params: { token: string } 
               {scene.svgIllustration && (
                 <div style={{ height: "240px", overflow: "hidden" }}
                   dangerouslySetInnerHTML={{
-                    __html: scene.svgIllustration.replace('viewBox="0 0 800 500"', 'viewBox="0 0 800 500" width="100%" height="100%" preserveAspectRatio="xMidYMid slice"')
+                    __html: toResponsiveSvg(scene.svgIllustration)
                   }} />
               )}
               <div style={{ padding: "24px" }}>

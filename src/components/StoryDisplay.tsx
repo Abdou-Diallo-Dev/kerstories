@@ -6,13 +6,15 @@ import { Story } from "@/lib/types";
 import PdfExport from "./PdfExport";
 import ShareButtons from "./ShareButtons";
 import { FLAG_MAP } from "@/lib/constants";
+import { toResponsiveSvg } from "@/lib/sanitizeSvg";
 
 interface StoryDisplayProps {
   story: Story;
+  storyId?: string | null;
   onNew: () => void;
 }
 
-export default function StoryDisplay({ story, onNew }: StoryDisplayProps) {
+export default function StoryDisplay({ story, storyId, onNew }: StoryDisplayProps) {
   const { meta, scenes, morale } = story;
   const flag = FLAG_MAP[meta.pays] ?? "🌍";
   const [currentScene, setCurrentScene] = useState(0);
@@ -239,8 +241,7 @@ export default function StoryDisplay({ story, onNew }: StoryDisplayProps) {
               style={{ height: "260px", borderColor: "rgba(139,69,19,0.15)" }}>
               <div className="w-full h-full"
                 dangerouslySetInnerHTML={{
-                  __html: getIllustration(currentScene)
-                    .replace('viewBox="0 0 800 500"', 'viewBox="0 0 800 500" width="100%" height="100%" preserveAspectRatio="xMidYMid slice"')
+                  __html: toResponsiveSvg(getIllustration(currentScene))
                 }}
               />
             </div>
@@ -281,7 +282,7 @@ export default function StoryDisplay({ story, onNew }: StoryDisplayProps) {
                 Nouvelle histoire
               </button>
               <PdfExport story={story} />
-              <ShareButtons story={story} />
+              <ShareButtons story={story} storyId={storyId} />
               <button style={btnStyle} onClick={() => { stopReading(); setCurrentScene(0); }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <polygon points="5 3 19 12 5 21 5 3"/>

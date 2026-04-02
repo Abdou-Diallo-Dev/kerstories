@@ -59,7 +59,7 @@ export default function StoryPage() {
         </Link>
       </header>
       <div className="flex-1 overflow-hidden" style={{ background: "var(--cream)" }}>
-        <StoryDisplay story={story} onNew={() => window.location.href = "/dashboard"} />
+        <StoryDisplay story={story} storyId={typeof id === "string" ? id : null} onNew={() => window.location.href = "/dashboard"} />
       </div>
     </div>
   );

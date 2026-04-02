@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { SavedStory } from "@/lib/types";
 import Link from "next/link";
+import { toResponsiveSvg } from "@/lib/sanitizeSvg";
 
 export default function HistoryPage() {
   const { user, loading: authLoading } = useAuth();
@@ -109,8 +110,7 @@ export default function HistoryPage() {
                     {story?.scenes?.[0]?.svgIllustration ? (
                       <div style={{ width: "100%", height: "100%", transform: "scale(1.1)", transformOrigin: "center" }}
                         dangerouslySetInnerHTML={{
-                          __html: story.scenes[0].svgIllustration
-                            .replace('viewBox="0 0 800 500"', 'viewBox="0 0 800 500" width="100%" height="100%" preserveAspectRatio="xMidYMid slice"')
+                          __html: toResponsiveSvg(story.scenes[0].svgIllustration)
                         }} />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center" style={{ fontSize: "48px" }}>📖</div>

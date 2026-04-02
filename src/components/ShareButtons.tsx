@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 
 interface ShareButtonsProps {
   story:   Story;
-  storyId?: string;
+  storyId?: string | null;
 }
 
 export default function ShareButtons({ story, storyId }: ShareButtonsProps) {

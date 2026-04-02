@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { Scene, StoryFormData } from "@/lib/types";
+import { toResponsiveSvg } from "@/lib/sanitizeSvg";
 
 interface SceneIllustrationProps {
   scene:  Scene;
@@ -104,11 +105,7 @@ export default function SceneIllustration({ scene, meta, index }: SceneIllustrat
       <div
         className="w-full h-full"
         style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
-        dangerouslySetInnerHTML={{ __html: svg
-          .replace(/width="[^"]*"/, 'width="100%"')
-          .replace(/height="[^"]*"/, 'height="100%"')
-          .replace(/<svg/, '<svg preserveAspectRatio="xMidYMid meet" style="width:100%;height:100%"')
-        }}
+        dangerouslySetInnerHTML={{ __html: toResponsiveSvg(svg, "xMidYMid meet") }}
       />
       {/* Légende */}
       <div className="absolute bottom-0 left-0 right-0 px-4 py-2"

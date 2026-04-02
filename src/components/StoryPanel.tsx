@@ -8,11 +8,12 @@ import { Story }    from "@/lib/types";
 
 interface StoryPanelProps {
   story:   Story | null;
+  storyId?: string | null;
   loading: boolean;
   onNew:   () => void;
 }
 
-export default function StoryPanel({ story, loading, onNew }: StoryPanelProps) {
+export default function StoryPanel({ story, storyId, loading, onNew }: StoryPanelProps) {
   return (
     <main
       className="flex-1 overflow-y-auto relative"
@@ -20,7 +21,7 @@ export default function StoryPanel({ story, loading, onNew }: StoryPanelProps) {
     >
       {loading && <LoadingState />}
       {!loading && !story && <EmptyState />}
-      {!loading && story && <StoryDisplay story={story} onNew={onNew} />}
+      {!loading && story && <StoryDisplay story={story} storyId={storyId} onNew={onNew} />}
     </main>
   );
 }

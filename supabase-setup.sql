@@ -124,7 +124,8 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ── 9. Vue admin : stats globales ──────────────────────────────
-CREATE OR REPLACE VIEW admin_stats AS
+CREATE OR REPLACE VIEW public.admin_stats
+WITH (security_invoker = true) AS
 SELECT
   (SELECT COUNT(*) FROM profiles)                          AS total_users,
   (SELECT COUNT(*) FROM profiles WHERE plan = 'premium')   AS premium_users,
