@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   id           UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   full_name    TEXT,
   avatar_url   TEXT,
-  role         TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+  role         TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin', 'super_admin')),
   plan         TEXT NOT NULL DEFAULT 'free' CHECK (plan IN ('free', 'premium')),
   stories_today INT NOT NULL DEFAULT 0,
   last_story_date DATE,
@@ -63,21 +63,27 @@ ALTER TABLE ai_usage_logs   ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users view own profile"   ON profiles FOR SELECT USING (auth.uid() = id);
 CREATE POLICY "Users update own profile" ON profiles FOR UPDATE USING (auth.uid() = id);
 CREATE POLICY "Admin view all profiles"  ON profiles FOR SELECT USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
+  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'super_admin'))
 );
 
 -- child_profiles
 CREATE POLICY "Users CRUD own children" ON child_profiles FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Admin view all children" ON child_profiles FOR SELECT USING (
+  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'super_admin'))
+);
 
 -- saved_stories
 CREATE POLICY "Users CRUD own stories"    ON saved_stories FOR ALL    USING (auth.uid() = user_id);
 CREATE POLICY "Anyone view shared story"  ON saved_stories FOR SELECT USING (shared = true);
+CREATE POLICY "Admin view all stories"    ON saved_stories FOR SELECT USING (
+  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'super_admin'))
+);
 
 -- ai_usage_logs
 CREATE POLICY "Users view own logs" ON ai_usage_logs FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Service insert logs" ON ai_usage_logs FOR INSERT WITH CHECK (true);
 CREATE POLICY "Admin view all logs" ON ai_usage_logs FOR SELECT USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
+  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'super_admin'))
 );
 
 -- ── 6. Trigger : créer profil auto à l'inscription ─────────────
@@ -135,3 +141,14 @@ SELECT
   (SELECT COUNT(*) FROM ai_usage_logs WHERE success = false AND created_at > NOW() - INTERVAL '24 hours') AS errors_today;
 
 -- ✅ Setup terminé !
+
+-- Option: promouvoir un compte en super admin (a executer manuellement)
+-- UPDATE profiles
+-- SET role = 'super_admin'
+-- WHERE id = 'UUID_DU_COMPTE';
+--
+-- UPDATE profiles p
+-- SET role = 'super_admin'
+-- FROM auth.users u
+-- WHERE p.id = u.id
+--   AND u.email = 'email@kerstories.com';

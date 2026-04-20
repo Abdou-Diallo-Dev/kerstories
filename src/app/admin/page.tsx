@@ -1,40 +1,78 @@
-// src/app/admin/page.tsx
-"use client";
+﻿"use client";
 
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import Link from "next/link";
 
+type UserRole = "user" | "admin" | "super_admin";
+
+type AdminTab = "overview" | "stats" | "users" | "logs";
+
 interface AdminStats {
-  total_users:   number;
+  total_users: number;
   premium_users: number;
   total_stories: number;
   stories_today: number;
-  stories_week:  number;
-  errors_today:  number;
+  stories_week: number;
+  errors_today: number;
 }
 
 interface UserRow {
-  id:            string;
-  full_name:     string;
-  role:          string;
-  plan:          string;
+  id: string;
+  full_name: string;
+  role: UserRole;
+  plan: string;
   total_stories: number;
-  created_at:    string;
+  created_at: string;
+}
+
+interface LogRow {
+  id: string;
+  user_id: string | null;
+  action: string;
+  model: string | null;
+  duration_ms: number;
+  success: boolean;
+  error_msg: string | null;
+  created_at: string;
+}
+
+interface StoryRow {
+  id: string;
+  user_id: string;
+  title: string;
+  created_at: string;
+  owner_name: string;
+}
+
+interface ActivityEvent {
+  id: string;
+  type: "new_user" | "story_saved" | "ai_log";
+  created_at: string;
+  label: string;
+  detail?: string;
+  ok?: boolean;
 }
 
 export default function AdminPage() {
   const { user, loading: authLoading } = useAuth();
-  const [stats,   setStats]   = useState<AdminStats | null>(null);
-  const [users,   setUsers]   = useState<UserRow[]>([]);
+  const [stats, setStats] = useState<AdminStats | null>(null);
+  const [users, setUsers] = useState<UserRow[]>([]);
+  const [logs, setLogs] = useState<LogRow[]>([]);
+  const [recentStories, setRecentStories] = useState<StoryRow[]>([]);
+  const [activityFeed, setActivityFeed] = useState<ActivityEvent[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [tab, setTab] = useState<AdminTab>("stats");
   const [loading, setLoading] = useState(true);
-  const [tab,     setTab]     = useState<"stats" | "users" | "logs">("stats");
-  const [logs,    setLogs]    = useState<any[]>([]);
   const supabase = createClient();
 
-  useEffect(() => { if (user) checkAdminAndLoad(); }, [user]);
+  useEffect(() => {
+    if (user) {
+      void checkAdminAndLoad();
+    }
+  }, [user]);
 
   async function checkAdminAndLoad() {
     try {
@@ -44,19 +82,31 @@ export default function AdminPage() {
         .eq("id", user!.id)
         .single();
 
-      console.log("Profile check:", profile, error);
+      const role = (profile?.role ?? "user") as UserRole;
+      const allowed = !error && ["admin", "super_admin"].includes(role);
 
-      if (error || !profile || profile.role !== "admin") {
+      if (!allowed) {
         setIsAdmin(false);
+        setIsSuperAdmin(false);
         setLoading(false);
         return;
       }
 
+      const superMode = role === "super_admin";
       setIsAdmin(true);
-      await Promise.all([loadStats(), loadUsers(), loadLogs()]);
-    } catch (e) {
-      console.error("Admin check error:", e);
+      setIsSuperAdmin(superMode);
+      setTab(superMode ? "overview" : "stats");
+
+      await Promise.all([
+        loadStats(),
+        loadUsers(),
+        loadLogs(),
+        loadGlobalActivity(superMode),
+      ]);
+    } catch (err) {
+      console.error("Admin check error:", err);
       setIsAdmin(false);
+      setIsSuperAdmin(false);
     } finally {
       setLoading(false);
     }
@@ -64,7 +114,9 @@ export default function AdminPage() {
 
   async function loadStats() {
     const { data } = await supabase.from("admin_stats").select("*").single();
-    if (data) setStats(data);
+    if (data) {
+      setStats(data as AdminStats);
+    }
   }
 
   async function loadUsers() {
@@ -73,7 +125,10 @@ export default function AdminPage() {
       .select("*")
       .order("created_at", { ascending: false })
       .limit(50);
-    if (data) setUsers(data);
+
+    if (data) {
+      setUsers(data as UserRow[]);
+    }
   }
 
   async function loadLogs() {
@@ -82,29 +137,140 @@ export default function AdminPage() {
       .select("*")
       .order("created_at", { ascending: false })
       .limit(100);
-    if (data) setLogs(data);
+
+    if (data) {
+      setLogs(data as LogRow[]);
+    }
+  }
+
+  async function loadGlobalActivity(canViewAll: boolean) {
+    if (!canViewAll) {
+      setRecentStories([]);
+      setActivityFeed([]);
+      return;
+    }
+
+    const [{ data: profilesData }, { data: storiesData }, { data: logsData }] = await Promise.all([
+      supabase
+        .from("profiles")
+        .select("id, full_name, role, plan, created_at")
+        .order("created_at", { ascending: false })
+        .limit(25),
+      supabase
+        .from("saved_stories")
+        .select("id, user_id, title, created_at")
+        .order("created_at", { ascending: false })
+        .limit(25),
+      supabase
+        .from("ai_usage_logs")
+        .select("id, user_id, action, model, success, duration_ms, created_at")
+        .order("created_at", { ascending: false })
+        .limit(25),
+    ]);
+
+    const knownUsers = new Map<string, string>();
+    (profilesData ?? []).forEach((p) => {
+      knownUsers.set(p.id, p.full_name || "Sans nom");
+    });
+
+    const missingIds = Array.from(
+      new Set(
+        [
+          ...(storiesData ?? []).map((s) => s.user_id),
+          ...(logsData ?? []).map((l) => l.user_id).filter((id): id is string => Boolean(id)),
+        ].filter(Boolean)
+      )
+    ).filter((id) => !knownUsers.has(id));
+
+    if (missingIds.length > 0) {
+      const { data: missingProfiles } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", missingIds);
+
+      (missingProfiles ?? []).forEach((p) => {
+        knownUsers.set(p.id, p.full_name || "Sans nom");
+      });
+    }
+
+    const storiesWithOwner: StoryRow[] = (storiesData ?? []).map((story) => ({
+      ...story,
+      owner_name: knownUsers.get(story.user_id) || "Utilisateur inconnu",
+    }));
+    setRecentStories(storiesWithOwner);
+
+    const profileEvents: ActivityEvent[] = (profilesData ?? []).map((p) => ({
+      id: `profile-${p.id}`,
+      type: "new_user",
+      created_at: p.created_at,
+      label: `${p.full_name || "Nouvel utilisateur"} vient de s'inscrire`,
+      detail: `${p.role} • ${p.plan}`,
+      ok: true,
+    }));
+
+    const storyEvents: ActivityEvent[] = storiesWithOwner.map((story) => ({
+      id: `story-${story.id}`,
+      type: "story_saved",
+      created_at: story.created_at,
+      label: `${story.owner_name} a enregistre une nouvelle histoire`,
+      detail: story.title,
+      ok: true,
+    }));
+
+    const logEvents: ActivityEvent[] = (logsData ?? []).map((log) => ({
+      id: `log-${log.id}`,
+      type: "ai_log",
+      created_at: log.created_at,
+      label: `${knownUsers.get(log.user_id || "") || "Utilisateur"} • ${log.action}`,
+      detail: `${log.model || "modele inconnu"} • ${log.duration_ms || 0}ms`,
+      ok: log.success,
+    }));
+
+    const combined = [...profileEvents, ...storyEvents, ...logEvents]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 60);
+
+    setActivityFeed(combined);
   }
 
   async function togglePlan(userId: string, currentPlan: string) {
     const newPlan = currentPlan === "premium" ? "free" : "premium";
     await supabase.from("profiles").update({ plan: newPlan }).eq("id", userId);
-    setUsers((u) => u.map((p) => p.id === userId ? { ...p, plan: newPlan } : p));
+    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, plan: newPlan } : u)));
   }
 
-  async function toggleRole(userId: string, currentRole: string) {
-    const newRole = currentRole === "admin" ? "user" : "admin";
+  async function toggleRole(userId: string, currentRole: UserRole) {
+    if (!isSuperAdmin || currentRole === "super_admin") {
+      return;
+    }
+
+    const newRole: UserRole = currentRole === "admin" ? "user" : "admin";
     await supabase.from("profiles").update({ role: newRole }).eq("id", userId);
-    setUsers((u) => u.map((p) => p.id === userId ? { ...p, role: newRole } : p));
+    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u)));
   }
 
-  function formatDate(d: string) {
-    return new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
+  function formatDate(date: string) {
+    return new Date(date).toLocaleDateString("fr-FR", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  }
+
+  function formatDateTime(date: string) {
+    return new Date(date).toLocaleString("fr-FR", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   }
 
   const numStyle: React.CSSProperties = {
-    fontSize:   "40px",
+    fontSize: "40px",
     fontWeight: 700,
-    lineHeight:  1,
+    lineHeight: 1,
     marginBottom: "8px",
     fontFamily: "var(--font-dm), 'Outfit', sans-serif",
     letterSpacing: "-1px",
@@ -117,97 +283,283 @@ export default function AdminPage() {
     fontFamily: "var(--font-dm), sans-serif",
   };
 
-  if (authLoading || loading) return (
-    <div className="min-h-screen flex items-center justify-center" style={{ background: "#0f0f0f" }}>
-      <div className="w-8 h-8 border-2 rounded-full animate-spin"
-        style={{ borderColor: "var(--terracotta) transparent transparent transparent" }} />
-    </div>
-  );
+  if (authLoading || loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "#0f0f0f" }}>
+        <div
+          className="w-8 h-8 border-2 rounded-full animate-spin"
+          style={{ borderColor: "var(--terracotta) transparent transparent transparent" }}
+        />
+      </div>
+    );
+  }
 
-  if (!isAdmin) return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-4" style={{ background: "#0f0f0f" }}>
-      <p style={{ fontSize: "48px" }}>🔒</p>
-      <h2 style={{ fontFamily: "var(--font-playfair), serif", fontSize: "24px", color: "var(--earth)" }}>
-        Accès refusé
-      </h2>
-      <p style={{ color: "#b09880" }}>Tu n&apos;as pas les droits d&apos;accès admin.</p>
-      <Link href="/dashboard" style={{ color: "var(--terracotta)", textDecoration: "underline" }}>
-        ← Retour au dashboard
-      </Link>
-    </div>
-  );
+  if (!isAdmin) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4" style={{ background: "#0f0f0f" }}>
+        <p style={{ fontSize: "48px" }}>LOCK</p>
+        <h2 style={{ fontFamily: "var(--font-playfair), serif", fontSize: "24px", color: "var(--earth)" }}>
+          Acces refuse
+        </h2>
+        <p style={{ color: "#b09880" }}>Tu n'as pas les droits d'acces admin.</p>
+        <Link href="/dashboard" style={{ color: "var(--terracotta)", textDecoration: "underline" }}>
+          Retour au dashboard
+        </Link>
+      </div>
+    );
+  }
 
   const statCards = [
-    { label: "Utilisateurs total",     val: stats?.total_users   ?? 0, color: "#E8C98A" },
-    { label: "Comptes Premium",        val: stats?.premium_users ?? 0, color: "#FFD700" },
-    { label: "Histoires totales",      val: stats?.total_stories ?? 0, color: "#C4622D" },
-    { label: "Histoires aujourd'hui",  val: stats?.stories_today ?? 0, color: "#4CAF50" },
-    { label: "Histoires cette semaine",val: stats?.stories_week  ?? 0, color: "#2196F3" },
-    { label: "Erreurs aujourd'hui",    val: stats?.errors_today  ?? 0, color: "#f44336" },
+    { label: "Utilisateurs total", val: stats?.total_users ?? 0, color: "#E8C98A" },
+    { label: "Comptes Premium", val: stats?.premium_users ?? 0, color: "#FFD700" },
+    { label: "Histoires totales", val: stats?.total_stories ?? 0, color: "#C4622D" },
+    { label: "Histoires aujourd'hui", val: stats?.stories_today ?? 0, color: "#4CAF50" },
+    { label: "Histoires cette semaine", val: stats?.stories_week ?? 0, color: "#2196F3" },
+    { label: "Erreurs aujourd'hui", val: stats?.errors_today ?? 0, color: "#f44336" },
   ];
 
-  const convRate = stats?.total_users
-    ? Math.round((( stats.premium_users) / stats.total_users) * 100)
-    : 0;
+  const convRate = stats?.total_users ? Math.round((stats.premium_users / stats.total_users) * 100) : 0;
+  const tabs: AdminTab[] = isSuperAdmin ? ["overview", "stats", "users", "logs"] : ["stats", "users", "logs"];
 
   return (
     <div style={{ background: "#0f0f0f", minHeight: "100vh", color: "white" }}>
-
-      {/* Header */}
-      <header style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "16px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <header
+        style={{
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+          padding: "16px 32px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
         <div className="flex items-center gap-4">
-          <Link href="/dashboard" style={{ fontFamily: "var(--font-playfair), serif", fontSize: "22px", fontWeight: 700, color: "var(--sand)", textDecoration: "none" }}>
-            Kër<span style={{ color: "var(--terracotta)", fontStyle: "italic" }}>Stories</span>
+          <Link
+            href="/dashboard"
+            style={{
+              fontFamily: "var(--font-playfair), serif",
+              fontSize: "22px",
+              fontWeight: 700,
+              color: "var(--sand)",
+              textDecoration: "none",
+            }}
+          >
+            Ker<span style={{ color: "var(--terracotta)", fontStyle: "italic" }}>Stories</span>
           </Link>
-          <span style={{ background: "rgba(196,98,45,0.2)", color: "var(--terracotta)", fontSize: "11px", fontWeight: 700, padding: "4px 12px", borderRadius: "4px", letterSpacing: "2px" }}>
-            ADMIN
+          <span
+            style={{
+              background: isSuperAdmin ? "rgba(255,215,0,0.18)" : "rgba(196,98,45,0.2)",
+              color: isSuperAdmin ? "#FFD700" : "var(--terracotta)",
+              fontSize: "11px",
+              fontWeight: 700,
+              padding: "4px 12px",
+              borderRadius: "4px",
+              letterSpacing: "2px",
+            }}
+          >
+            {isSuperAdmin ? "SUPER ADMIN" : "ADMIN"}
           </span>
         </div>
         <Link href="/dashboard" style={{ color: "rgba(255,255,255,0.3)", textDecoration: "none", fontSize: "13px" }}>
-          ← Dashboard
+          Dashboard
         </Link>
       </header>
 
       <div style={{ padding: "32px", maxWidth: "1200px", margin: "0 auto" }}>
-
-        {/* Tabs */}
         <div className="flex gap-2 mb-8">
-          {(["stats", "users", "logs"] as const).map((t) => (
-            <button key={t} onClick={() => setTab(t)}
+          {tabs.map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
               style={{
-                padding: "10px 24px", borderRadius: "8px", fontSize: "13px",
-                fontWeight: 600, border: "none", cursor: "pointer",
+                padding: "10px 24px",
+                borderRadius: "8px",
+                fontSize: "13px",
+                fontWeight: 600,
+                border: "none",
+                cursor: "pointer",
                 background: tab === t ? "var(--terracotta)" : "rgba(255,255,255,0.06)",
                 color: tab === t ? "white" : "rgba(255,255,255,0.5)",
                 fontFamily: "var(--font-dm), sans-serif",
-              }}>
-              {t === "stats" ? "📊 Statistiques" : t === "users" ? "👥 Utilisateurs" : "🔍 Logs IA"}
+              }}
+            >
+              {t === "overview"
+                ? "Vue Globale"
+                : t === "stats"
+                  ? "Statistiques"
+                  : t === "users"
+                    ? "Utilisateurs"
+                    : "Logs IA"}
             </button>
           ))}
         </div>
 
-        {/* ── Stats ── */}
+        {tab === "overview" && isSuperAdmin && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.06)",
+                borderRadius: "14px",
+                overflow: "hidden",
+              }}
+            >
+              <div style={{ padding: "16px 24px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                <p
+                  style={{
+                    color: "rgba(255,255,255,0.5)",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    letterSpacing: "2px",
+                    fontFamily: "var(--font-dm), sans-serif",
+                  }}
+                >
+                  ACTIVITE EN TEMPS REEL
+                </p>
+              </div>
+              <div style={{ maxHeight: "540px", overflowY: "auto" }}>
+                {activityFeed.length === 0 ? (
+                  <div style={{ padding: "32px 24px", color: "rgba(255,255,255,0.35)" }}>
+                    Aucune activite recemment enregistree.
+                  </div>
+                ) : (
+                  activityFeed.map((event) => (
+                    <div
+                      key={event.id}
+                      style={{
+                        display: "flex",
+                        gap: "12px",
+                        alignItems: "center",
+                        padding: "12px 18px",
+                        borderBottom: "1px solid rgba(255,255,255,0.04)",
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: "8px",
+                          height: "8px",
+                          borderRadius: "999px",
+                          background:
+                            event.ok === false
+                              ? "#f44336"
+                              : event.type === "new_user"
+                                ? "#FFD700"
+                                : event.type === "story_saved"
+                                  ? "#4CAF50"
+                                  : "#2196F3",
+                          flexShrink: 0,
+                        }}
+                      />
+                      <div style={{ flex: 1 }}>
+                        <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.85)" }}>{event.label}</p>
+                        <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.35)" }}>
+                          {event.detail || "Sans detail"} • {formatDateTime(event.created_at)}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.06)",
+                borderRadius: "14px",
+                overflow: "hidden",
+              }}
+            >
+              <div style={{ padding: "16px 24px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                <p
+                  style={{
+                    color: "rgba(255,255,255,0.5)",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    letterSpacing: "2px",
+                    fontFamily: "var(--font-dm), sans-serif",
+                  }}
+                >
+                  DERNIERES HISTOIRES
+                </p>
+              </div>
+              <div style={{ maxHeight: "540px", overflowY: "auto" }}>
+                {recentStories.length === 0 ? (
+                  <div style={{ padding: "32px 24px", color: "rgba(255,255,255,0.35)" }}>Aucune histoire recente.</div>
+                ) : (
+                  recentStories.map((story) => (
+                    <div key={story.id} style={{ padding: "14px 18px", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                      <p style={{ color: "rgba(255,255,255,0.85)", fontSize: "14px", fontWeight: 600 }}>{story.title}</p>
+                      <p style={{ color: "rgba(255,255,255,0.35)", fontSize: "12px", marginTop: "4px" }}>
+                        Par {story.owner_name} • {formatDateTime(story.created_at)}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {tab === "stats" && (
           <div>
             <div className="admin-stats-grid grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
               {statCards.map((s) => (
-                <div key={s.label} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "14px", padding: "28px 24px" }}>
+                <div
+                  key={s.label}
+                  style={{
+                    background: "rgba(255,255,255,0.04)",
+                    border: "1px solid rgba(255,255,255,0.06)",
+                    borderRadius: "14px",
+                    padding: "28px 24px",
+                  }}
+                >
                   <p style={{ ...numStyle, color: s.color }}>{s.val}</p>
                   <p style={labelStyle}>{s.label}</p>
                 </div>
               ))}
             </div>
 
-            {/* Taux de conversion */}
-            <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "14px", padding: "28px 24px" }}>
-              <p style={{ color: "rgba(255,255,255,0.5)", fontSize: "12px", fontWeight: 600, letterSpacing: "2px", marginBottom: "20px", fontFamily: "var(--font-dm), sans-serif" }}>
-                TAUX DE CONVERSION FREE → PREMIUM
+            <div
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.06)",
+                borderRadius: "14px",
+                padding: "28px 24px",
+              }}
+            >
+              <p
+                style={{
+                  color: "rgba(255,255,255,0.5)",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  letterSpacing: "2px",
+                  marginBottom: "20px",
+                  fontFamily: "var(--font-dm), sans-serif",
+                }}
+              >
+                TAUX DE CONVERSION FREE VERS PREMIUM
               </p>
               <div className="flex items-center gap-4">
                 <div style={{ flex: 1, height: "10px", background: "rgba(255,255,255,0.08)", borderRadius: "5px", overflow: "hidden" }}>
-                  <div style={{ height: "100%", borderRadius: "5px", background: "var(--terracotta)", width: `${convRate}%`, transition: "width 0.8s ease" }} />
+                  <div
+                    style={{
+                      height: "100%",
+                      borderRadius: "5px",
+                      background: "var(--terracotta)",
+                      width: `${convRate}%`,
+                      transition: "width 0.8s ease",
+                    }}
+                  />
                 </div>
-                <span style={{ fontSize: "28px", fontWeight: 700, color: "var(--terracotta)", fontFamily: "var(--font-dm), sans-serif", minWidth: "60px" }}>
+                <span
+                  style={{
+                    fontSize: "28px",
+                    fontWeight: 700,
+                    color: "var(--terracotta)",
+                    fontFamily: "var(--font-dm), sans-serif",
+                    minWidth: "60px",
+                  }}
+                >
                   {convRate}%
                 </span>
               </div>
@@ -218,7 +570,6 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* ── Utilisateurs ── */}
         {tab === "users" && (
           <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "14px", overflow: "hidden" }}>
             <div style={{ padding: "16px 24px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
@@ -230,8 +581,20 @@ export default function AdminPage() {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-                    {["Nom", "ID", "Plan", "Rôle", "Histoires", "Inscrit le", "Actions"].map((h) => (
-                      <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.25)", letterSpacing: "1.5px", textTransform: "uppercase", fontFamily: "var(--font-dm), sans-serif" }}>
+                    {["Nom", "ID", "Plan", "Role", "Histoires", "Inscrit le", "Actions"].map((h) => (
+                      <th
+                        key={h}
+                        style={{
+                          padding: "12px 16px",
+                          textAlign: "left",
+                          fontSize: "11px",
+                          fontWeight: 600,
+                          color: "rgba(255,255,255,0.25)",
+                          letterSpacing: "1.5px",
+                          textTransform: "uppercase",
+                          fontFamily: "var(--font-dm), sans-serif",
+                        }}
+                      >
                         {h}
                       </th>
                     ))}
@@ -241,28 +604,50 @@ export default function AdminPage() {
                   {users.map((u) => (
                     <tr key={u.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
                       <td style={{ padding: "14px 16px", fontSize: "14px", color: "rgba(255,255,255,0.8)", fontFamily: "var(--font-dm), sans-serif" }}>
-                        {u.full_name || <span style={{ color: "rgba(255,255,255,0.2)" }}>—</span>}
+                        {u.full_name || <span style={{ color: "rgba(255,255,255,0.2)" }}>-</span>}
                       </td>
                       <td style={{ padding: "14px 16px", fontSize: "12px", color: "rgba(255,255,255,0.3)", fontFamily: "monospace" }}>
                         {u.id.slice(0, 8)}...
                       </td>
                       <td style={{ padding: "14px 16px" }}>
-                        <span style={{
-                          background: u.plan === "premium" ? "rgba(255,215,0,0.12)" : "rgba(255,255,255,0.06)",
-                          color: u.plan === "premium" ? "#FFD700" : "rgba(255,255,255,0.35)",
-                          fontSize: "11px", fontWeight: 700, padding: "4px 12px", borderRadius: "4px",
-                          fontFamily: "var(--font-dm), sans-serif", letterSpacing: "0.5px",
-                        }}>
-                          {u.plan === "premium" ? "⭐ PREMIUM" : "FREE"}
+                        <span
+                          style={{
+                            background: u.plan === "premium" ? "rgba(255,215,0,0.12)" : "rgba(255,255,255,0.06)",
+                            color: u.plan === "premium" ? "#FFD700" : "rgba(255,255,255,0.35)",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            padding: "4px 12px",
+                            borderRadius: "4px",
+                            fontFamily: "var(--font-dm), sans-serif",
+                            letterSpacing: "0.5px",
+                          }}
+                        >
+                          {u.plan === "premium" ? "PREMIUM" : "FREE"}
                         </span>
                       </td>
                       <td style={{ padding: "14px 16px" }}>
-                        <span style={{
-                          background: u.role === "admin" ? "rgba(196,98,45,0.15)" : "rgba(255,255,255,0.04)",
-                          color: u.role === "admin" ? "var(--terracotta)" : "rgba(255,255,255,0.25)",
-                          fontSize: "11px", fontWeight: 700, padding: "4px 12px", borderRadius: "4px",
-                          fontFamily: "var(--font-dm), sans-serif", letterSpacing: "0.5px",
-                        }}>
+                        <span
+                          style={{
+                            background:
+                              u.role === "super_admin"
+                                ? "rgba(255,215,0,0.18)"
+                                : u.role === "admin"
+                                  ? "rgba(196,98,45,0.15)"
+                                  : "rgba(255,255,255,0.04)",
+                            color:
+                              u.role === "super_admin"
+                                ? "#FFD700"
+                                : u.role === "admin"
+                                  ? "var(--terracotta)"
+                                  : "rgba(255,255,255,0.25)",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            padding: "4px 12px",
+                            borderRadius: "4px",
+                            fontFamily: "var(--font-dm), sans-serif",
+                            letterSpacing: "0.5px",
+                          }}
+                        >
                           {u.role.toUpperCase()}
                         </span>
                       </td>
@@ -274,14 +659,40 @@ export default function AdminPage() {
                       </td>
                       <td style={{ padding: "14px 16px" }}>
                         <div className="flex gap-2">
-                          <button onClick={() => togglePlan(u.id, u.plan)}
-                            style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.6)", border: "none", borderRadius: "6px", padding: "6px 12px", fontSize: "12px", cursor: "pointer", fontWeight: 500, fontFamily: "var(--font-dm), sans-serif" }}>
+                          <button
+                            onClick={() => togglePlan(u.id, u.plan)}
+                            style={{
+                              background: "rgba(255,255,255,0.06)",
+                              color: "rgba(255,255,255,0.6)",
+                              border: "none",
+                              borderRadius: "6px",
+                              padding: "6px 12px",
+                              fontSize: "12px",
+                              cursor: "pointer",
+                              fontWeight: 500,
+                              fontFamily: "var(--font-dm), sans-serif",
+                            }}
+                          >
                             {u.plan === "premium" ? "→ Free" : "→ Premium"}
                           </button>
-                          <button onClick={() => toggleRole(u.id, u.role)}
-                            style={{ background: "rgba(196,98,45,0.1)", color: "var(--terracotta)", border: "none", borderRadius: "6px", padding: "6px 12px", fontSize: "12px", cursor: "pointer", fontWeight: 500, fontFamily: "var(--font-dm), sans-serif" }}>
-                            {u.role === "admin" ? "→ User" : "→ Admin"}
-                          </button>
+                          {isSuperAdmin && u.role !== "super_admin" && (
+                            <button
+                              onClick={() => toggleRole(u.id, u.role)}
+                              style={{
+                                background: "rgba(196,98,45,0.1)",
+                                color: "var(--terracotta)",
+                                border: "none",
+                                borderRadius: "6px",
+                                padding: "6px 12px",
+                                fontSize: "12px",
+                                cursor: "pointer",
+                                fontWeight: 500,
+                                fontFamily: "var(--font-dm), sans-serif",
+                              }}
+                            >
+                              {u.role === "admin" ? "→ User" : "→ Admin"}
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -292,7 +703,6 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* ── Logs IA ── */}
         {tab === "logs" && (
           <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "14px", overflow: "hidden" }}>
             <div style={{ padding: "16px 24px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
@@ -307,22 +717,56 @@ export default function AdminPage() {
             ) : (
               <div style={{ maxHeight: "600px", overflowY: "auto" }}>
                 {logs.map((log) => (
-                  <div key={log.id} style={{ padding: "14px 24px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", alignItems: "center", gap: "16px" }}>
-                    <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: log.success ? "#4CAF50" : "#f44336", flexShrink: 0 }} />
+                  <div
+                    key={log.id}
+                    style={{
+                      padding: "14px 24px",
+                      borderBottom: "1px solid rgba(255,255,255,0.04)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "16px",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: "8px",
+                        height: "8px",
+                        borderRadius: "50%",
+                        background: log.success ? "#4CAF50" : "#f44336",
+                        flexShrink: 0,
+                      }}
+                    />
                     <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.3)", width: "160px", flexShrink: 0, fontFamily: "var(--font-dm), sans-serif" }}>
-                      {new Date(log.created_at).toLocaleString("fr-FR")}
+                      {formatDateTime(log.created_at)}
                     </span>
                     <span style={{ fontSize: "13px", color: "rgba(255,255,255,0.7)", flex: 1, fontFamily: "var(--font-dm), sans-serif" }}>
                       {log.action}
                     </span>
                     <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.25)", fontFamily: "monospace" }}>
-                      {log.model || "—"}
+                      {log.model || "-"}
                     </span>
-                    <span style={{ fontSize: "12px", fontWeight: 600, color: log.duration_ms > 5000 ? "#FF9800" : "rgba(255,255,255,0.3)", fontFamily: "var(--font-dm), sans-serif" }}>
+                    <span
+                      style={{
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        color: log.duration_ms > 5000 ? "#FF9800" : "rgba(255,255,255,0.3)",
+                        fontFamily: "var(--font-dm), sans-serif",
+                      }}
+                    >
                       {log.duration_ms}ms
                     </span>
                     {log.error_msg && (
-                      <span style={{ fontSize: "11px", color: "#f44336", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "var(--font-dm), sans-serif" }}>
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          color: "#f44336",
+                          maxWidth: "200px",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          fontFamily: "var(--font-dm), sans-serif",
+                        }}
+                      >
                         {log.error_msg}
                       </span>
                     )}
